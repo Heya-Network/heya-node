@@ -42,6 +42,7 @@ pub mod pallet {
 		pub price: Option<BalanceOf<T>>,
 		pub owner: AccountOf<T>,
 		pub dna: [u8; 16],
+		pub room_hash: T::Hash,
 	}
 	// Struct for holding Room information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -162,7 +163,7 @@ pub mod pallet {
 		BoundedVec<T::Hash, T::MaxTimesharesPerRoom>,
 		ValueQuery,
 	>;
-	
+
 	#[pallet::storage]
 	#[pallet::getter(fn timeshares_owned)]
 	/// Keeps track of which timeshares belong to which AccountId
@@ -171,6 +172,7 @@ pub mod pallet {
 		Twox64Concat,
 		T::AccountId,
 		Vec<T::Hash>, //TODO: create type hash of timeshare
+		ValueQuery,
 	>;
 
 	#[pallet::storage]
@@ -354,45 +356,45 @@ pub mod pallet {
 			room_number: Vec<u8>,
 			price: Option<BalanceOf<T>>,
 		) -> Result<T::Hash, Error<T>> {
+			let room = Room::<T> {
+				hotel: owner.clone(),
+				room_number: room_number.clone(),
+			};
+			let room_hash = T::Hashing::hash_of(&room);
 			let timeshare = Timeshare::<T> {
 				price: price.clone(),
 				owner: owner.clone(),
 				hotel: owner.clone(),
 				room_number: room_number.clone(),
 				dna: Self::gen_dna(),
+				room_hash: room_hash,
 			};
 			let timeshare_id = T::Hashing::hash_of(&timeshare);
 			ensure!(!<Timeshares<T>>::contains_key(timeshare_id), <Error<T>>::MintingDuplicateTimeshare);
+			
 			//add timeshare to room
-			let room = Room::<T> {
-				hotel: owner.clone(),
-				room_number: room_number,
-			};
-			let room_hash = T::Hashing::hash_of(&room);
 			<RoomsTimeshares<T>>::try_mutate(room_hash, |vec| vec.try_push(timeshare_id))
 				.map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
 
-			// Self::transfer_timeshare_to(&timeshare_id, owner)?;
 			<TimesharesOwned<T>>::mutate(&owner, |timeshare_vec| {
-				match timeshare_vec {
-					None => {
-						log::info!("New Timeshare Owner");
-						let mut vec = Vec::<T::Hash>::new();
-						vec.push(timeshare_id);
-						<TimesharesOwned<T>>::insert(owner, vec);
-						return;
-					},
-					Some(timeshare_vec) => {
-						log::info!("Adding Timeshare pre-existing Owner");
-						return timeshare_vec.push(timeshare_id); 
-					}
-				}
+				// match timeshare_vec {
+				// 	None => {
+				// 		log::info!("New Timeshare Owner");
+				// 		let mut vec = Vec::new();
+				// 		vec.push(timeshare_id);
+				// 		<TimesharesOwned<T>>::insert(&owner, vec);
+				// 		return;
+				// 	},
+				// 	Some(timeshare_vec) => {
+				// 		log::info!("Adding Timeshare pre-existing Owner");
+				// 		return timeshare_vec.push(timeshare_id); 
+				// 	}
+				// }
+					timeshare_vec.push(timeshare_id);
 			});
 			<Timeshares<T>>::insert(timeshare_id, timeshare);
-			// <KittyCnt<T>>::put(new_cnt);
 			// let now = Utc::now().naive_utc();
 			// Self::deposit_event(Event::Success(now.format("%-I:%M %p").to_string(),
-			// now.format("%Y-%m-%d").to_string()));
 			Ok(timeshare_id)
 		}
 
@@ -434,18 +436,15 @@ pub mod pallet {
 				Err(())
 			})
 			.map_err(|_| <Error<T>>::TimeshareDoesntExist)?;
-
-			// <TimesharesOwned<T>>::mutate(&prev_owner, |timeshare_vec| {
-			// 	match timeshare_vec {
-			// 		None => {
-			// 			return Err(())
-			// 		},
-			// 		Some(timeshare_vec) => {
-			// 			timeshare_vec.swap_remove(*timeshare_id); 
-			// 			return Ok(())
-			// 		}
-			// 	}
-			// });
+			
+			<TimesharesOwned<T>>::try_mutate(&prev_owner, |owned| {
+				if let Some(index) = owned.iter().position(|&id| id == *timeshare_id) {
+					owned.swap_remove(index);
+					return Ok(())
+				}
+				Err(())
+			})
+			.map_err(|_| <Error<T>>::TimeshareDoesntExist)?;
 
 			// Update the timeshare owner
 			timeshare.owner = to.clone();
@@ -456,8 +455,8 @@ pub mod pallet {
 			<Timeshares<T>>::insert(timeshare_id, timeshare);
 
 			//TODO: change to TimeshareOwned
-			<KittiesOwned<T>>::try_mutate(to, |vec| vec.try_push(*timeshare_id))
-				.map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
+			<TimesharesOwned<T>>::mutate(to, |vec| vec.push(*timeshare_id));
+				// .map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
 
 			Ok(())
 		}
