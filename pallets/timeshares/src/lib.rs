@@ -23,7 +23,7 @@ pub mod pallet {
 	type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 	pub type HashOf<T> = <T as frame_system::Config>::Hash;
-	
+
 	// Struct for holding Kitty information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
@@ -56,8 +56,6 @@ pub mod pallet {
 	#[scale_info(skip_type_params(T))]
 	#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 	pub enum HotelStatus {
-		Male,
-		Female,
 		Active,
 		Suspended,
 		Pending,
@@ -83,27 +81,27 @@ pub mod pallet {
 	// Errors.
 	#[pallet::error]
 	pub enum Error<T> {
+		/// A room cannot have more timeshares than `MaxTimesharesPerRoom`.
 		MaximumTimesharesForRoomReached,
-		/// An account cannot own more Kitties than `MaxKittyCount`.
-		ExceedMaxTimesharesPerRoom,
 		/// Buyer cannot be the owner.
 		BuyerIsKittyOwner,
-		/// Cannot transfer a kitty to its owner.
+		/// Cannot transfer a timeshare to its owner.
 		TransferToSelf,
-		/// Handles checking whether the Kitty exists.
+		/// Handles checking whether the timeshare exists.
 		TimeshareDoesntExist,
-		/// Handles checking that the Kitty is owned by the account transferring, buying or setting
+		/// Handles checking that the timeshare is owned by the account transferring, buying or setting
 		/// a price for it.
 		NotTimeshareOwner,
-		/// Ensures the Kitty is for sale.
+		/// Ensures the timeshare is for sale.
 		KittyNotForSale,
 		/// Ensures that the buying price is greater than the asking price.
 		KittyBidPriceTooLow,
-		/// Ensures that an account has enough funds to purchase a Kitty.
+		/// Ensures that an account has enough funds to purchase a timeshare.
 		NotEnoughBalance,
 		/// Can't mind, duplicate ID
 		MintingDuplicateTimeshare,
 		HotelAlreadyActive,
+		HotelAlreadyPending,
 		Forbidden,
 		HotelNotActive,
 		HotelNotRegistered,
@@ -209,6 +207,15 @@ pub mod pallet {
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 
+		#[pallet::weight(0)]
+		pub fn register_hotel(origin: OriginFor<T>) -> DispatchResult {
+			let sender = ensure_signed(origin)?;
+			let current_status = <HotelStatuses<T>>::get(&sender);
+			ensure!(current_status == None, <Error<T>>::HotelAlreadyPending);
+			<HotelStatuses<T>>::insert(sender, HotelStatus::Pending);
+			Ok(())
+		}
+
 		#[pallet::weight(100)]
 		pub fn create_timeshare(
 			origin: OriginFor<T>, 
@@ -297,7 +304,7 @@ pub mod pallet {
 			let buyer_owned = <KittiesOwned<T>>::get(&buyer);
 			ensure!(
 				(buyer_owned.len() as u32) < T::MaxTimesharesPerRoom::get(),
-				<Error<T>>::ExceedMaxTimesharesPerRoom
+				<Error<T>>::MaximumTimesharesForRoomReached
 			);
 
 			let seller = kitty.owner.clone();
@@ -360,7 +367,7 @@ pub mod pallet {
 			
 			//add timeshare to room
 			<RoomsTimeshares<T>>::try_mutate(room_hash, |vec| vec.try_push(timeshare_id))
-				.map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
+				.map_err(|_| <Error<T>>::MaximumTimesharesForRoomReached)?;
 
 			<TimesharesOwned<T>>::mutate(&owner, |timeshare_vec| {
 				timeshare_vec.push(timeshare_id);
