@@ -273,7 +273,7 @@ impl pallet_sudo::Config for Runtime {
 
 parameter_types! {
 	// 1 room can have max 200 timeshares
-	pub const MaxTimesharesPerRoom: u8 = 1;
+	pub const MaxTimesharesPerRoom: u8 = 200;
 }
 
 /// Configure the pallet-kitties in pallets/kitties.

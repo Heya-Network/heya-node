@@ -110,6 +110,8 @@ pub mod pallet {
 		MintingDuplicateTimeshare,
 		HotelAlreadyActive,
 		Forbidden,
+		HotelNotActive,
+		HotelNotRegistered,
 	}
 
 	// Events.
@@ -140,17 +142,6 @@ pub mod pallet {
 	pub(super) type Timeshares<T: Config> = StorageMap<_, Twox64Concat, T::Hash, Timeshare<T>>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn kitties_owned)]
-	/// Keeps track of which timeshares belong to which room
-	pub(super) type KittiesOwned<T: Config> = StorageMap<
-		_,
-		Twox64Concat,
-		T::AccountId,
-		BoundedVec<T::Hash, T::MaxTimesharesPerRoom>,
-		ValueQuery,
-	>;
-
-	#[pallet::storage]
 	#[pallet::getter(fn rooms_timeshares)]
 	/// Keeps track of which timeshares belong to which room
 	pub(super) type RoomsTimeshares<T: Config> = StorageMap<
@@ -162,6 +153,17 @@ pub mod pallet {
 	>;
 
 	#[pallet::storage]
+	#[pallet::getter(fn kitties_owned)]
+	/// Keeps track of which timeshares belong to which room
+	pub(super) type KittiesOwned<T: Config> = StorageMap<
+		_,
+		Twox64Concat,
+		T::AccountId,
+		BoundedVec<T::Hash, T::MaxTimesharesPerRoom>,
+		ValueQuery,
+	>;
+	
+	#[pallet::storage]
 	#[pallet::getter(fn timeshares_owned)]
 	/// Keeps track of which timeshares belong to which AccountId
 	pub(super) type TimesharesOwned<T: Config> = StorageMap<
@@ -172,7 +174,7 @@ pub mod pallet {
 	>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn hotel_status)]
+	#[pallet::getter(fn hotel_statuses)]
 	/// Keeps track of each hotel's status
 	pub(super) type HotelStatuses<T: Config> = StorageMap<_, Twox64Concat, T::AccountId, HotelStatus>;
 
@@ -218,6 +220,7 @@ pub mod pallet {
 			price: Option<BalanceOf<T>>,
 		) -> DispatchResult {
 			let sender = ensure_signed(origin)?;
+			ensure!(Self::is_active(&sender)?, <Error<T>>::HotelNotActive);
 			let timeshare_id = Self::mint(&sender, room_number, price)?; 
 			log::info!("A timeshare is born with ID: {:?}.", timeshare_id);
 			Self::deposit_event(Event::Created(sender, timeshare_id));
@@ -373,13 +376,14 @@ pub mod pallet {
 			<TimesharesOwned<T>>::mutate(&owner, |timeshare_vec| {
 				match timeshare_vec {
 					None => {
-						// *timeshare_vec = vec![timeshare_id];
+						log::info!("New Timeshare Owner");
 						let mut vec = Vec::<T::Hash>::new();
 						vec.push(timeshare_id);
 						<TimesharesOwned<T>>::insert(owner, vec);
 						return;
 					},
 					Some(timeshare_vec) => {
+						log::info!("Adding Timeshare pre-existing Owner");
 						return timeshare_vec.push(timeshare_id); 
 					}
 				}
@@ -406,6 +410,14 @@ pub mod pallet {
 				None => Err(<Error<T>>::TimeshareDoesntExist),
 			}
 		}
+
+		pub fn is_active(hotel: &T::AccountId) -> Result<bool, Error<T>> {
+			match Self::hotel_statuses(hotel) {
+				Some(status) => Ok(status == HotelStatus::Active),
+				None => Err(<Error<T>>::HotelNotRegistered),
+			}
+		}
+
 		#[transactional]
 		pub fn transfer_timeshare_to(timeshare_id: &T::Hash, to: &T::AccountId) -> Result<(), Error<T>> {
 			let mut timeshare = Self::timeshares(&timeshare_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
@@ -413,7 +425,7 @@ pub mod pallet {
 			let prev_owner = timeshare.owner.clone();
 
 			// Remove `timeshare_id` from the KittyOwned vector of `prev_timeshare_owner`
-			//TODO: change to TimeshareOwned
+			//TODO: change to TimeshareOwnec
 			<KittiesOwned<T>>::try_mutate(&prev_owner, |owned| {
 				if let Some(index) = owned.iter().position(|&id| id == *timeshare_id) {
 					owned.swap_remove(index);
