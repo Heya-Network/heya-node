@@ -23,7 +23,7 @@ pub mod pallet {
 	type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 	pub type HashOf<T> = <T as frame_system::Config>::Hash;
-	// pub type RoomHash<T> = Room<AccountIdOf<T>, HashOf<T>>;
+	
 	// Struct for holding Kitty information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
@@ -52,12 +52,6 @@ pub mod pallet {
 		pub room_number: Vec<u8>,
 	}
 	
-	// impl MaxEncodedLen for Kitty {
-	// 	fn max_encoded_len(&self) -> usize {
-	// 		return self.max_encoded_len(50)
-	// 	}
-	// }
-
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
@@ -100,7 +94,7 @@ pub mod pallet {
 		TimeshareDoesntExist,
 		/// Handles checking that the Kitty is owned by the account transferring, buying or setting
 		/// a price for it.
-		NotKittyOwner,
+		NotTimeshareOwner,
 		/// Ensures the Kitty is for sale.
 		KittyNotForSale,
 		/// Ensures that the buying price is greater than the asking price.
@@ -113,6 +107,7 @@ pub mod pallet {
 		Forbidden,
 		HotelNotActive,
 		HotelNotRegistered,
+		NotFoundInTimesharesOwned,
 	}
 
 	// Events.
@@ -184,7 +179,6 @@ pub mod pallet {
 	#[pallet::getter(fn admin_key)]
 	pub type AdminAccountId<T: Config> = StorageValue<_, T::AccountId, ValueQuery>;
 
-	// TODO Part IV: Our pallet's genesis configuration.
 	// Our pallet's genesis configuration.
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
@@ -214,7 +208,7 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		// TODO Part III: create_kitty
+
 		#[pallet::weight(100)]
 		pub fn create_timeshare(
 			origin: OriginFor<T>, 
@@ -229,8 +223,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Set the price for a Kitty.
-		/// Updates Kitty price and updates storage.
+		/// Set the price for a Kitty. Updates Kitty price and updates storage.
 		#[pallet::weight(100)]
 		pub fn set_price(
 			origin: OriginFor<T>,
@@ -239,7 +232,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let sender = ensure_signed(origin)?;
 
-			ensure!(Self::is_timeshare_owner(&kitty_id, &sender)?, <Error<T>>::NotKittyOwner);
+			ensure!(Self::is_timeshare_owner(&kitty_id, &sender)?, <Error<T>>::NotTimeshareOwner);
 
 			let mut kitty = Self::kitties(&kitty_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
 
@@ -257,26 +250,19 @@ pub mod pallet {
 		pub fn transfer(
 			origin: OriginFor<T>,
 			to: T::AccountId,
-			kitty_id: T::Hash,
+			timeshare_id: T::Hash,
 		) -> DispatchResult {
 			let from = ensure_signed(origin)?;
 
-			// Ensure the kitty exists and is called by the kitty owner
-			ensure!(Self::is_timeshare_owner(&kitty_id, &from)?, <Error<T>>::NotKittyOwner);
+			// Ensure the timeshare exists and is called by the timeshare owner
+			ensure!(Self::is_timeshare_owner(&timeshare_id, &from)?, <Error<T>>::NotTimeshareOwner);
 
-			// Verify the kitty is not transferring back to its owner.
+			// Verify the owner is not transferring to themselves.
 			ensure!(from != to, <Error<T>>::TransferToSelf);
 
-			// Verify the recipient has the capacity to receive one more kitty
-			let to_owned = <KittiesOwned<T>>::get(&to);
-			ensure!(
-				(to_owned.len() as u32) < T::MaxTimesharesPerRoom::get(),
-				<Error<T>>::ExceedMaxTimesharesPerRoom
-			);
+			Self::transfer_timeshare_to(&timeshare_id, &to)?;
 
-			Self::transfer_timeshare_to(&kitty_id, &to)?;
-
-			Self::deposit_event(Event::Transferred(from, to, kitty_id));
+			Self::deposit_event(Event::Transferred(from, to, timeshare_id));
 
 			Ok(())
 		}
@@ -329,7 +315,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// For Admins to to set a hotel's status. "Active" to allow timeshares.
+		/// For Admins to set a hotel's status. "Active" to allow timeshares.
 		#[pallet::weight(0)]
 		pub fn set_hotel_status(origin: OriginFor<T>, hotel: T::AccountId, status: HotelStatus) -> DispatchResult {
 			let admin = ensure_signed(origin)?;
@@ -377,20 +363,7 @@ pub mod pallet {
 				.map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
 
 			<TimesharesOwned<T>>::mutate(&owner, |timeshare_vec| {
-				// match timeshare_vec {
-				// 	None => {
-				// 		log::info!("New Timeshare Owner");
-				// 		let mut vec = Vec::new();
-				// 		vec.push(timeshare_id);
-				// 		<TimesharesOwned<T>>::insert(&owner, vec);
-				// 		return;
-				// 	},
-				// 	Some(timeshare_vec) => {
-				// 		log::info!("Adding Timeshare pre-existing Owner");
-				// 		return timeshare_vec.push(timeshare_id); 
-				// 	}
-				// }
-					timeshare_vec.push(timeshare_id);
+				timeshare_vec.push(timeshare_id);
 			});
 			<Timeshares<T>>::insert(timeshare_id, timeshare);
 			// let now = Utc::now().naive_utc();
@@ -426,17 +399,6 @@ pub mod pallet {
 
 			let prev_owner = timeshare.owner.clone();
 
-			// Remove `timeshare_id` from the KittyOwned vector of `prev_timeshare_owner`
-			//TODO: change to TimeshareOwnec
-			<KittiesOwned<T>>::try_mutate(&prev_owner, |owned| {
-				if let Some(index) = owned.iter().position(|&id| id == *timeshare_id) {
-					owned.swap_remove(index);
-					return Ok(())
-				}
-				Err(())
-			})
-			.map_err(|_| <Error<T>>::TimeshareDoesntExist)?;
-			
 			<TimesharesOwned<T>>::try_mutate(&prev_owner, |owned| {
 				if let Some(index) = owned.iter().position(|&id| id == *timeshare_id) {
 					owned.swap_remove(index);
@@ -444,19 +406,18 @@ pub mod pallet {
 				}
 				Err(())
 			})
-			.map_err(|_| <Error<T>>::TimeshareDoesntExist)?;
+			.map_err(|_| <Error<T>>::NotFoundInTimesharesOwned)?;
 
 			// Update the timeshare owner
 			timeshare.owner = to.clone();
 			// Reset the ask price so the timeshare is not for sale until `set_price()` is called
 			// by the current owner.
 			timeshare.price = None;
-
+			//update Timeshares with updated timeshare
 			<Timeshares<T>>::insert(timeshare_id, timeshare);
 
-			//TODO: change to TimeshareOwned
+			//add timeshare_id to new owner's vec
 			<TimesharesOwned<T>>::mutate(to, |vec| vec.push(*timeshare_id));
-				// .map_err(|_| <Error<T>>::ExceedMaxTimesharesPerRoom)?;
 
 			Ok(())
 		}
