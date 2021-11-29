@@ -46,8 +46,7 @@ pub mod pallet {
 		TransferToSelf,
 		/// Handles checking whether the timeshare exists.
 		TimeshareDoesntExist,
-		/// Handles checking that the timeshare is owned by the account transferring, buying or setting
-		/// a price for it.
+		/// Non-owner is attempting an action only the owner is allowed to perform
 		NotTimeshareOwner,
 		/// Ensures the timeshare is for sale.
 		NotForSale,
@@ -130,17 +129,6 @@ pub mod pallet {
 	>;
 
 	#[pallet::storage]
-	#[pallet::getter(fn kitties_owned)]
-	/// Keeps track of which timeshares belong to which room
-	pub(super) type KittiesOwned<T: Config> = StorageMap<
-		_,
-		Twox64Concat,
-		T::AccountId,
-		BoundedVec<T::Hash, T::MaxTimesharesPerRoom>,
-		ValueQuery,
-	>;
-
-	#[pallet::storage]
 	#[pallet::getter(fn timeshares_owned)]
 	/// Keeps track of which timeshares belong to which AccountId
 	pub(super) type TimesharesOwned<T: Config> = StorageMap<
@@ -163,7 +151,7 @@ pub mod pallet {
 	// Our pallet's genesis configuration.
 	#[pallet::genesis_config]
 	pub struct GenesisConfig<T: Config> {
-		pub kitties: Vec<(T::AccountId, [u8; 16], HotelStatus)>,
+		pub seeded_timeshares: Vec<(T::AccountId, Vec<u8>, Option<BalanceOf<T>>)>,
 		pub admin_account_id: T::AccountId,
 	}
 
@@ -171,16 +159,17 @@ pub mod pallet {
 	#[cfg(feature = "std")]
 	impl<T: Config> Default for GenesisConfig<T> {
 		fn default() -> GenesisConfig<T> {
-			GenesisConfig { kitties: vec![], admin_account_id: Default::default() }
+			GenesisConfig { seeded_timeshares: vec![], admin_account_id: Default::default() }
 		}
 	}
 
 	#[pallet::genesis_build]
 	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
-			// for (acct, dna, hotel_status) in &self.kitties {
-				// let _ = <Pallet<T>>::mint(acct, Some(dna.clone()), Some(hotel_status.clone()));
-			// }
+			// When building a timeshare from the genesis config, we require the owner, room_number and price (can be None) to be supplied.
+			for (acct, room_number, price) in &self.seeded_timeshares {
+				let _ = <Pallet<T>>::mint(acct, room_number.clone(), price.clone());
+			}
 			//Set the admin_account_id from the chainspec for privileged extrinsics
 			AdminAccountId::<T>::put(&self.admin_account_id);
 		}

@@ -134,6 +134,7 @@ pub fn local_testnet_config() -> Result<ChainSpec, String> {
 }
 
 /// Configure initial storage state for FRAME modules.
+//TODO: created seeded_timeshares so genesis block has timeshares
 fn testnet_genesis(
 	wasm_binary: &[u8],
 	initial_authorities: Vec<(AuraId, GrandpaId)>,
@@ -163,7 +164,7 @@ fn testnet_genesis(
 			key: root_key,
 		},
 		timeshares: TimesharesConfig {
-            kitties: vec![],
+			seeded_timeshares: vec![],
 			admin_account_id: admin_account_id.clone(),
         },
 	}
