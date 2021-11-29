@@ -15,14 +15,84 @@ pub mod pallet {
 	use scale_info::prelude::vec::Vec;
 	// use codec::{MaxEncodedLen};
 	// use chrono::*;
-
 	#[cfg(feature = "std")]
 	use frame_support::serde::{Deserialize, Serialize};
+
+	/// Configure the pallet by specifying the parameters and types it depends on.
+	#[pallet::config]
+	pub trait Config: frame_system::Config {
+		/// Because this pallet emits events, it depends on the runtime's definition of an event.
+		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
+		/// The Currency handler for the Timeshares pallet.
+		type Currency: Currency<Self::AccountId>;
+		type Randomness: Randomness<Self::Hash, Self::BlockNumber>;
+		#[pallet::constant]
+		type MaxTimesharesPerRoom: Get<u32>;
+	}
 
 	type AccountOf<T> = <T as frame_system::Config>::AccountId;
 	type BalanceOf<T> =
 		<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 	pub type HashOf<T> = <T as frame_system::Config>::Hash;
+
+	// Errors.
+	#[pallet::error]
+	pub enum Error<T> {
+		/// A room cannot have more timeshares than `MaxTimesharesPerRoom`.
+		MaximumTimesharesForRoomReached,
+		/// Buyer cannot be the owner.
+		BuyerIsTimeshareOwner,
+		/// Cannot transfer a timeshare to its owner.
+		TransferToSelf,
+		/// Handles checking whether the timeshare exists.
+		TimeshareDoesntExist,
+		/// Handles checking that the timeshare is owned by the account transferring, buying or setting
+		/// a price for it.
+		NotTimeshareOwner,
+		/// Ensures the timeshare is for sale.
+		NotForSale,
+		/// Ensures that the buying price is greater than the asking price.
+		BidPriceTooLow,
+		/// Ensures buyer account has enough free funds to purchase a timeshare.
+		NotEnoughFreeBalance,
+		/// Can't mint, duplicate ID
+		MintingDuplicateTimeshare,
+		HotelAlreadyActive,
+		HotelAlreadyPending,
+		Forbidden,
+		HotelNotActive,
+		HotelNotRegistered,
+		NotFoundInTimesharesOwned,
+	}
+
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[scale_info(skip_type_params(T))]
+	#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+	pub enum HotelStatus {
+		Active,
+		Suspended,
+		Pending,
+	}
+
+	// Events.
+	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	pub enum Event<T: Config> {
+		// Success(String, String), //Time, Date
+		/// A new Timeshare was sucessfully created. \[sender, timeshare_id\]
+		Created(T::AccountId, T::Hash),
+		/// Timeshare price was sucessfully set. \[sender, kitty_id, new_price\]
+		PriceSet(T::AccountId, T::Hash, Option<BalanceOf<T>>),
+		/// A Timeshare was sucessfully transferred. \[from, to, kitty_id\]
+		Transferred(T::AccountId, T::AccountId, T::Hash),
+		/// A Timeshare was sucessfully bought. \[buyer, seller, kitty_id, bid_price\]
+		Bought(T::AccountId, T::AccountId, T::Hash, BalanceOf<T>),
+	}
+
+	#[pallet::pallet]
+	#[pallet::generate_store(pub(super) trait Store)]
+	// #[pallet::generate_storage_info]
+	pub struct Pallet<T>(_);
 
 	// Struct for holding Kitty information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
@@ -37,13 +107,14 @@ pub mod pallet {
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
 	pub struct Timeshare<T: Config> {
-		pub hotel: AccountOf<T>,
+		pub hotel: AccountOf<T>, //TODO: make this hex so it's the same as room_hash?
 		pub room_number: Vec<u8>,
 		pub price: Option<BalanceOf<T>>,
-		pub owner: AccountOf<T>,
+		pub owner: AccountOf<T>, //TODO: make this hex so it's the same as room_hash?
 		pub dna: [u8; 16],
 		pub room_hash: T::Hash,
 	}
+
 	// Struct for holding Room information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
@@ -51,81 +122,6 @@ pub mod pallet {
 		pub hotel: AccountOf<T>,
 		pub room_number: Vec<u8>,
 	}
-	
-	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
-	#[scale_info(skip_type_params(T))]
-	#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
-	pub enum HotelStatus {
-		Active,
-		Suspended,
-		Pending,
-	}
-
-	#[pallet::pallet]
-	#[pallet::generate_store(pub(super) trait Store)]
-	// #[pallet::generate_storage_info]
-	pub struct Pallet<T>(_);
-
-	/// Configure the pallet by specifying the parameters and types it depends on.
-	#[pallet::config]
-	pub trait Config: frame_system::Config {
-		/// Because this pallet emits events, it depends on the runtime's definition of an event.
-		type Event: From<Event<Self>> + IsType<<Self as frame_system::Config>::Event>;
-		/// The Currency handler for the Timeshares pallet.
-		type Currency: Currency<Self::AccountId>;
-		type Randomness: Randomness<Self::Hash, Self::BlockNumber>;
-		#[pallet::constant]
-		type MaxTimesharesPerRoom: Get<u32>;
-	}
-
-	// Errors.
-	#[pallet::error]
-	pub enum Error<T> {
-		/// A room cannot have more timeshares than `MaxTimesharesPerRoom`.
-		MaximumTimesharesForRoomReached,
-		/// Buyer cannot be the owner.
-		BuyerIsKittyOwner,
-		/// Cannot transfer a timeshare to its owner.
-		TransferToSelf,
-		/// Handles checking whether the timeshare exists.
-		TimeshareDoesntExist,
-		/// Handles checking that the timeshare is owned by the account transferring, buying or setting
-		/// a price for it.
-		NotTimeshareOwner,
-		/// Ensures the timeshare is for sale.
-		KittyNotForSale,
-		/// Ensures that the buying price is greater than the asking price.
-		KittyBidPriceTooLow,
-		/// Ensures that an account has enough funds to purchase a timeshare.
-		NotEnoughBalance,
-		/// Can't mind, duplicate ID
-		MintingDuplicateTimeshare,
-		HotelAlreadyActive,
-		HotelAlreadyPending,
-		Forbidden,
-		HotelNotActive,
-		HotelNotRegistered,
-		NotFoundInTimesharesOwned,
-	}
-
-	// Events.
-	#[pallet::event]
-	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> {
-		// Success(String, String), //Time, Date
-		/// A new Timeshare was sucessfully created. \[sender, timeshare_id\]
-		Created(T::AccountId, T::Hash),
-		/// Kitty price was sucessfully set. \[sender, kitty_id, new_price\]
-		PriceSet(T::AccountId, T::Hash, Option<BalanceOf<T>>),
-		/// A Kitty was sucessfully transferred. \[from, to, kitty_id\]
-		Transferred(T::AccountId, T::AccountId, T::Hash),
-		/// A Kitty was sucessfully bought. \[buyer, seller, kitty_id, bid_price\]
-		Bought(T::AccountId, T::AccountId, T::Hash, BalanceOf<T>),
-	}
-
-	#[pallet::storage]
-	#[pallet::getter(fn kitty_cnt)]
-	pub(super) type KittyCnt<T: Config> = StorageValue<_, u64, ValueQuery>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn kitties)]
@@ -195,11 +191,10 @@ pub mod pallet {
 	#[pallet::genesis_build]
 	impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
 		fn build(&self) {
-			// When building a kitty from genesis config, we require the dna and hotel_status to be
-			// supplied.
 			// for (acct, dna, hotel_status) in &self.kitties {
 				// let _ = <Pallet<T>>::mint(acct, Some(dna.clone()), Some(hotel_status.clone()));
 			// }
+			//Set the admin_account_id from the chainspec for privileged extrinsics
 			AdminAccountId::<T>::put(&self.admin_account_id);
 		}
 	}
@@ -274,50 +269,42 @@ pub mod pallet {
 			Ok(())
 		}
 
-		// buy_kitty
+		/// Buy Timeshare
 		#[transactional]
 		#[pallet::weight(100)]
-		pub fn buy_kitty(
+		pub fn buy_timeshare(
 			origin: OriginFor<T>,
-			kitty_id: T::Hash,
+			timeshare_id: T::Hash,
 			bid_price: BalanceOf<T>,
 		) -> DispatchResult {
 			let buyer = ensure_signed(origin)?;
 
-			// Check the kitty exists and buyer is not the current kitty owner
-			let kitty = Self::kitties(&kitty_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
-			ensure!(kitty.owner != buyer, <Error<T>>::BuyerIsKittyOwner);
+			// Check the timeshare exists and buyer is not the current timeshare owner
+			let timeshare = Self::timeshares(&timeshare_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
+			ensure!(timeshare.owner != buyer, <Error<T>>::BuyerIsTimeshareOwner);
 
-			// ACTION #6: Check if the Kitty is for sale.
-			// Check the kitty is for sale and the kitty ask price <= bid_price
-			if let Some(ask_price) = kitty.price {
-				ensure!(ask_price <= bid_price, <Error<T>>::KittyBidPriceTooLow);
+			// ACTION #6: Check if the Timeshare is for sale.
+			// Check the timeshare is for sale and the timeshare ask price <= bid_price
+			if let Some(ask_price) = timeshare.price {
+				ensure!(ask_price <= bid_price, <Error<T>>::BidPriceTooLow);
 			} else {
-				Err(<Error<T>>::KittyNotForSale)?;
+				Err(<Error<T>>::NotForSale)?;
 			}
 
 			// Check the buyer has enough free balance
-			ensure!(T::Currency::free_balance(&buyer) >= bid_price, <Error<T>>::NotEnoughBalance);
+			ensure!(T::Currency::free_balance(&buyer) >= bid_price, <Error<T>>::NotEnoughFreeBalance);
 
-			// ACTION #7: Check if buyer can receive Kitty.
-			// Verify the buyer has the capacity to receive one more kitty
-			let buyer_owned = <KittiesOwned<T>>::get(&buyer);
-			ensure!(
-				(buyer_owned.len() as u32) < T::MaxTimesharesPerRoom::get(),
-				<Error<T>>::MaximumTimesharesForRoomReached
-			);
-
-			let seller = kitty.owner.clone();
+			let seller = timeshare.owner.clone();
 
 			// Transfer the amount from buyer to seller
 			//the '?' ensures Ok() is returned else exit early
 			T::Currency::transfer(&buyer, &seller, bid_price, ExistenceRequirement::KeepAlive)?;
 
-			// Transfer the kitty from seller to buyer
-			Self::transfer_timeshare_to(&kitty_id, &buyer)?;
+			// Transfer the timeshare from seller to buyer
+			Self::transfer_timeshare_to(&timeshare_id, &buyer)?;
 
 			// Deposit relevant Event
-			Self::deposit_event(Event::Bought(buyer, seller, kitty_id, bid_price));
+			Self::deposit_event(Event::Bought(buyer, seller, timeshare_id, bid_price));
 
 			Ok(())
 		}
