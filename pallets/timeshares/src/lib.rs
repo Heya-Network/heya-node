@@ -81,11 +81,11 @@ pub mod pallet {
 		// Success(String, String), //Time, Date
 		/// A new Timeshare was sucessfully created. \[sender, timeshare_id\]
 		Created(T::AccountId, T::Hash),
-		/// Timeshare price was sucessfully set. \[sender, kitty_id, new_price\]
+		/// Timeshare price was sucessfully set. \[sender, timeshare_id, new_price\]
 		PriceSet(T::AccountId, T::Hash, Option<BalanceOf<T>>),
-		/// A Timeshare was sucessfully transferred. \[from, to, kitty_id\]
+		/// A Timeshare was sucessfully transferred. \[from, to, timeshare_id\]
 		Transferred(T::AccountId, T::AccountId, T::Hash),
-		/// A Timeshare was sucessfully bought. \[buyer, seller, kitty_id, bid_price\]
+		/// A Timeshare was sucessfully bought. \[buyer, seller, timeshare_id, bid_price\]
 		Bought(T::AccountId, T::AccountId, T::Hash, BalanceOf<T>),
 	}
 
@@ -94,15 +94,6 @@ pub mod pallet {
 	// #[pallet::generate_storage_info]
 	pub struct Pallet<T>(_);
 
-	// Struct for holding Kitty information.
-	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
-	#[scale_info(skip_type_params(T))]
-	pub struct Kitty<T: Config> {
-		pub dna: [u8; 16],
-		pub price: Option<BalanceOf<T>>,
-		pub hotel_status: HotelStatus,
-		pub owner: AccountOf<T>,
-	}
 	// Struct for holding Timeshare information.
 	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
 	#[scale_info(skip_type_params(T))]
@@ -122,10 +113,6 @@ pub mod pallet {
 		pub hotel: AccountOf<T>,
 		pub room_number: Vec<u8>,
 	}
-
-	#[pallet::storage]
-	#[pallet::getter(fn kitties)]
-	pub(super) type Kitties<T: Config> = StorageMap<_, Twox64Concat, T::Hash, Kitty<T>>;
 
 	#[pallet::storage]
 	#[pallet::getter(fn timeshares)]
@@ -225,25 +212,25 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Set the price for a Kitty. Updates Kitty price and updates storage.
+		/// Set the price for a Timeshare. Updates Timeshare price and updates storage.
 		#[pallet::weight(100)]
 		pub fn set_price(
 			origin: OriginFor<T>,
-			kitty_id: T::Hash,
+			timeshare_id: T::Hash,
 			new_price: Option<BalanceOf<T>>,
 		) -> DispatchResult {
 			let sender = ensure_signed(origin)?;
 
-			ensure!(Self::is_timeshare_owner(&kitty_id, &sender)?, <Error<T>>::NotTimeshareOwner);
+			ensure!(Self::is_timeshare_owner(&timeshare_id, &sender)?, <Error<T>>::NotTimeshareOwner);
 
-			let mut kitty = Self::kitties(&kitty_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
+			let mut timeshare = Self::timeshares(&timeshare_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
 
-			kitty.price = new_price.clone();
+			timeshare.price = new_price.clone();
 
-			<Kitties<T>>::insert(kitty_id, kitty);
+			<Timeshares<T>>::insert(timeshare_id, timeshare);
 
 			// Deposit a "PriceSet" event.
-			Self::deposit_event(Event::PriceSet(sender, kitty_id, new_price));
+			Self::deposit_event(Event::PriceSet(sender, timeshare_id, new_price));
 
 			Ok(())
 		}
@@ -283,7 +270,6 @@ pub mod pallet {
 			let timeshare = Self::timeshares(&timeshare_id).ok_or(<Error<T>>::TimeshareDoesntExist)?;
 			ensure!(timeshare.owner != buyer, <Error<T>>::BuyerIsTimeshareOwner);
 
-			// ACTION #6: Check if the Timeshare is for sale.
 			// Check the timeshare is for sale and the timeshare ask price <= bid_price
 			if let Some(ask_price) = timeshare.price {
 				ensure!(ask_price <= bid_price, <Error<T>>::BidPriceTooLow);
@@ -296,8 +282,7 @@ pub mod pallet {
 
 			let seller = timeshare.owner.clone();
 
-			// Transfer the amount from buyer to seller
-			//the '?' ensures Ok() is returned else exit early
+			// Transfer the amount from buyer to seller. The '?' ensures Ok() is returned else exit early
 			T::Currency::transfer(&buyer, &seller, bid_price, ExistenceRequirement::KeepAlive)?;
 
 			// Transfer the timeshare from seller to buyer
