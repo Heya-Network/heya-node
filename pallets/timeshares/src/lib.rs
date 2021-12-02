@@ -56,7 +56,7 @@ pub mod pallet {
 		NotEnoughFreeBalance,
 		/// Can't mint, duplicate ID
 		MintingDuplicateTimeshare,
-		HotelAlreadyActive,
+		StatusAlreadySet,
 		HotelAlreadyPending,
 		Forbidden,
 		HotelNotActive,
@@ -287,15 +287,15 @@ pub mod pallet {
 		#[pallet::weight(0)]
 		pub fn set_hotel_status(origin: OriginFor<T>, hotel: T::AccountId, status: HotelStatus) -> DispatchResult {
 			let admin = ensure_signed(origin)?;
-			log::info!("signer ID: {:?}.", admin);
-			log::info!("admin ID: {:?}.", AdminAccountId::<T>::get());
-			// ensure!(admin == AdminAccountId::<T>::get(), Error::<T>::Forbidden);
-			// let current_status = <HotelStatuses<T>>::get(&hotel);
-			// if match current_status {
-			// 	Some(s) => current_status = s,
-			// 	None => Err(())
-			// }
-			// ensure!(matches!(current_status, status), <Error<T>>::HotelAlreadyActive);
+			//ensure origin is an admin
+			ensure!(admin == Self::admin_key(), Error::<T>::Forbidden);
+
+			let current_status = <HotelStatuses<T>>::get(&hotel);
+			if current_status != None { //hotel has a status
+				let same_status = current_status.map_or(false, |s| s == status);
+				//avoid writing new block if status == current_status
+				ensure!(!same_status, <Error<T>>::StatusAlreadySet);
+			}
 			<HotelStatuses<T>>::insert(hotel, status);
 			Ok(())
 		}
